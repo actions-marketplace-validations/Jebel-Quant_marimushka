@@ -1,5 +1,5 @@
-# This file is part of the tschm/.config-templates repository
-# (https://github.com/tschm/.config-templates).
+# This file is part of the jebel-quant/rhiza repository
+# (https://github.com/jebel-quant/rhiza).
 #
 # Workflow: Book
 # Purpose: This workflow builds and deploys comprehensive documentation for the project.
@@ -36,29 +36,26 @@ jobs:
 
     steps:
       # Check out the repository code
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           lfs: true
+
+      # Determine the Python version to use
+      - name: Get Python version
+        id: get-python
+        run: |
+          echo "python-version=$(python ./.github/workflows/scripts/version_max.py)" >> "$GITHUB_OUTPUT"
 
       # Use the composite action to set up the project
       - name: Setup the project
         uses: ./.github/actions/setup-project
-
-      - name: "Make the docs"
-        run: |
-          task docs:docs
-
-      - name: "Make the tests"
-        run: |
-          task docs:test
-
-      - name: "Make the notebooks"
-        run: |
-          task docs:marimushka
+        with:
+          python-version: ${{ steps.get-python.outputs.python-version }}
+          uv-extra-index-url: ${{ secrets.UV_EXTRA_INDEX_URL }}
 
       - name: "Make the book"
         run: |
-          task docs:book
+          make book
 
       # Step 5: Package all artifacts for GitHub Pages deployment
       # This prepares the combined outputs for deployment by creating a single artifact
@@ -69,6 +66,10 @@ jobs:
 
       # Step 6: Deploy the packaged artifacts to GitHub Pages
       # This step publishes the content to GitHub Pages
+      # The deployment is conditional based on whether the repository is a fork and the PUBLISH_COMPANION_BOOK variable is set
+      # If the repository is a fork, deployment is skipped to avoid unauthorized publishing
+      # If PUBLISH_COMPANION_BOOK is not set, it defaults to allowing deployment
       - name: Deploy to GitHub Pages
-        if: ${{ !github.event.repository.fork }}
+        if: ${{ !github.event.repository.fork && (vars.PUBLISH_COMPANION_BOOK == 'true' || vars.PUBLISH_COMPANION_BOOK == '') }}
         uses: actions/deploy-pages@v4  # Official GitHub Pages deployment action
+        continue-on-error: true

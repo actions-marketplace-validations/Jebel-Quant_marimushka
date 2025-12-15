@@ -1,5 +1,5 @@
-# This file is part of the tschm/.config-templates repository
-# (https://github.com/tschm/.config-templates).
+# This file is part of the jebel-quant/rhiza repository
+# (https://github.com/jebel-quant/rhiza).
 #
 # Workflow: Sync
 #
@@ -27,15 +27,15 @@ on:
 
 jobs:
   sync:
-    if: ${{ github.repository != 'tschm/.config-templates' }}
+    if: ${{ github.repository != 'jebel-quant/rhiza' }}
     runs-on: ubuntu-latest
     steps:
       - name: Sync Template
         id: sync
-        uses: jebel-quant/sync_template@v0.4.1
+        uses: jebel-quant/sync_template@v0.4.2
         with:
           token: ${{ secrets.PAT_TOKEN }}
           source: ".github/template.yml"
           branch: "template-updates"
           commit-message: "chore: sync template files"
-          automerge: true
+          automerge: false

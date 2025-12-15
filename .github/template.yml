@@ -1,8 +1,7 @@
-template-repository: "tschm/.config-templates"
+template-repository: "jebel-quant/rhiza"
 template-branch: "main"
 include: |
     .github
-    taskfiles
     tests
     .editorconfig
     .gitignore
@@ -11,4 +10,7 @@ include: |
     CONTRIBUTING.md
     Makefile
     ruff.toml
-    Taskfile.yml
+    pytest.ini
+exclude: |
+    .github/workflows/devcontainer.yml
+    .github/workflows/docker.yml
