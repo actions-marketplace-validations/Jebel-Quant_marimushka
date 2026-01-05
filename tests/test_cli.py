@@ -26,9 +26,9 @@ def test_version(mock_rich_print):
     mock_rich_print.assert_called_once()
 
 
-def test_export_run():
+def test_export_run(marimushka_path):
     """Test the export command."""
     # Run the command and capture the output
-    result = subprocess.run(["marimushka", "export"], capture_output=True, text=True, check=True)
+    result = subprocess.run([marimushka_path, "export"], capture_output=True, text=True, check=True)
     print("Command succeeded:")
     print(result.stdout)

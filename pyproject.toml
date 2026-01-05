@@ -1,10 +1,10 @@
 [project]
 name = 'marimushka'
-version = "0.1.9"
+version = "0.2.2"
 description = "Export marimo notebooks in style"
 authors = [{name='Jebel Quant LLC', email= 'contact@jqr.ae'}]
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "typer>=0.16.0",
     "jinja2>=3.1.6",
@@ -12,11 +12,13 @@ dependencies = [
     "rich==14.2.0"
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
-    "pytest>=8.4.0",
-    "pytest-cov>=6.2.1",
-    "beautifulsoup4>=4.12.0"
+    "beautifulsoup4>=4.12.0",
+    "numpy>=2.4",
+    "marimo>=0.18",
+    "plotly>=6.5",
+    "pandas>=2.3"
 ]
 
 [project.urls]
@@ -39,7 +41,3 @@ include = [
     "README.md",
     "src/marimushka"
 ]
-
-[tool.deptry]
-# see https://deptry.com/usage/#pep-621-dev-dependency-groups
-pep621_dev_dependency_groups = ["dev"]

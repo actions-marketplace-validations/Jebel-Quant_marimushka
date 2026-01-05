@@ -308,8 +308,48 @@ class TestNotebook:
             # shutil.which returns the full path, so we check if it ends with the executable name
             assert cmd_args[0].endswith(executable)
 
+    @patch("os.access")
     @patch("shutil.which")
-    def test_export_bin_path_not_found(self, mock_which, resource_dir, tmp_path):
+    @patch("subprocess.run")
+    def test_export_bin_path_fallback_success(self, mock_run, mock_which, mock_access, resource_dir, tmp_path):
+        """Test export of a notebook with fallback when shutil.which fails."""
+        # Setup
+        notebook_path = resource_dir / "notebooks" / "fibonacci.py"
+        output_dir = tmp_path
+        bin_path = Path("/custom/bin")
+        executable = "uvx"
+
+        # Mock shutil.which to return None (simulating the case where it doesn't work)
+        mock_which.return_value = None
+        # Mock os.access to return True (executable is accessible)
+        mock_access.return_value = True
+        # Mock successful subprocess run
+        mock_run.return_value = MagicMock(returncode=0)
+
+        # Create a notebook with mocked path validation
+        with (
+            patch.object(Path, "exists", return_value=True),
+            patch.object(Path, "is_file", return_value=True),
+            patch.object(Path, "suffix", ".py"),
+        ):
+            notebook = Notebook(notebook_path, kind=Kind.NB)
+
+            # Mock the is_file check on the executable path
+            with patch.object(Path, "is_file", return_value=True):
+                # Execute
+                result = notebook.export(output_dir, bin_path=bin_path)
+
+                # Assert
+                assert result is True
+                mock_run.assert_called_once()
+
+                # Check that the command uses the fallback path
+                cmd_args = mock_run.call_args[0][0]
+                assert cmd_args[0] == str(bin_path / executable)
+
+    @patch("os.access")
+    @patch("shutil.which")
+    def test_export_bin_path_not_found(self, mock_which, mock_access, resource_dir, tmp_path):
         """Test export of a notebook when bin path executable is not found."""
         # Setup
         notebook_path = resource_dir / "notebooks" / "fibonacci.py"
@@ -318,6 +358,34 @@ class TestNotebook:
 
         # Mock shutil.which to return None
         mock_which.return_value = None
+        # Mock os.access to return False (executable is not accessible)
+        mock_access.return_value = False
+
+        # Create a notebook with mocked path validation
+        with (
+            patch.object(Path, "exists", return_value=True),
+            patch.object(Path, "is_file", return_value=True),
+            patch.object(Path, "suffix", ".py"),
+        ):
+            notebook = Notebook(notebook_path, kind=Kind.NB)
+
+            # Mock the is_file check on the executable path to return False
+            with patch.object(Path, "is_file", return_value=False):
+                # Execute
+                result = notebook.export(output_dir, bin_path=bin_path)
+
+                # Assert
+                assert result is False
+
+    @patch("subprocess.run")
+    def test_export_nonzero_returncode(self, mock_run, resource_dir, tmp_path):
+        """Test export of a notebook when subprocess returns non-zero exit code."""
+        # Setup
+        notebook_path = resource_dir / "notebooks" / "fibonacci.py"
+        output_dir = tmp_path
+
+        # Mock subprocess run with non-zero returncode
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="Export failed")
 
         # Create a notebook with mocked path validation
         with (
@@ -328,7 +396,84 @@ class TestNotebook:
             notebook = Notebook(notebook_path, kind=Kind.NB)
 
             # Execute
-            result = notebook.export(output_dir, bin_path=bin_path)
+            result = notebook.export(output_dir)
 
             # Assert
             assert result is False
+            mock_run.assert_called_once()
+
+    def test_display_name(self, resource_dir):
+        """Test the display_name property of the Notebook class."""
+        # Setup
+        notebook_path = resource_dir / "notebooks" / "fibonacci.py"
+
+        # Create a notebook with mocked path validation
+        with (
+            patch.object(Path, "exists", return_value=True),
+            patch.object(Path, "is_file", return_value=True),
+            patch.object(Path, "suffix", ".py"),
+        ):
+            notebook = Notebook(notebook_path, kind=Kind.NB)
+
+            # Execute
+            display_name = notebook.display_name
+
+            # Assert
+            assert display_name == "fibonacci"
+
+    def test_display_name_with_underscores(self):
+        """Test the display_name property with underscores in the filename."""
+        # Setup
+        notebook_path = Path("my_test_notebook.py")
+
+        # Create a notebook with mocked path validation
+        with (
+            patch.object(Path, "exists", return_value=True),
+            patch.object(Path, "is_file", return_value=True),
+            patch.object(Path, "suffix", ".py"),
+        ):
+            notebook = Notebook(notebook_path, kind=Kind.NB)
+
+            # Execute
+            display_name = notebook.display_name
+
+            # Assert
+            assert display_name == "my test notebook"
+
+    def test_html_path(self, resource_dir):
+        """Test the html_path property of the Notebook class."""
+        # Setup
+        notebook_path = resource_dir / "notebooks" / "fibonacci.py"
+
+        # Create a notebook with mocked path validation
+        with (
+            patch.object(Path, "exists", return_value=True),
+            patch.object(Path, "is_file", return_value=True),
+            patch.object(Path, "suffix", ".py"),
+        ):
+            notebook = Notebook(notebook_path, kind=Kind.NB)
+
+            # Execute
+            html_path = notebook.html_path
+
+            # Assert
+            assert html_path == Path("notebooks") / "fibonacci.html"
+
+    def test_html_path_app(self, resource_dir):
+        """Test the html_path property for an app notebook."""
+        # Setup
+        notebook_path = resource_dir / "apps" / "charts.py"
+
+        # Create a notebook with mocked path validation
+        with (
+            patch.object(Path, "exists", return_value=True),
+            patch.object(Path, "is_file", return_value=True),
+            patch.object(Path, "suffix", ".py"),
+        ):
+            notebook = Notebook(notebook_path, kind=Kind.APP)
+
+            # Execute
+            html_path = notebook.html_path
+
+            # Assert
+            assert html_path == Path("apps") / "charts.html"
