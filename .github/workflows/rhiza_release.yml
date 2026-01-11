@@ -73,7 +73,7 @@ jobs:
       tag: ${{ steps.set_tag.outputs.tag }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.1
         with:
           fetch-depth: 0
 
@@ -104,7 +104,7 @@ jobs:
     needs: tag
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.1
         with:
           fetch-depth: 0
 
@@ -182,7 +182,7 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.1
         with:
           fetch-depth: 0
 
@@ -230,7 +230,7 @@ jobs:
       image_name: ${{ steps.image_name.outputs.image_name }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.1
         with:
           fetch-depth: 0
 
@@ -315,7 +315,7 @@ jobs:
     if: needs.pypi.result == 'success' || needs.devcontainer.result == 'success'
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.1
         with:
           fetch-depth: 0
 
