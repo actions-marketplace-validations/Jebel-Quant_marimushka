@@ -4,11 +4,20 @@ This module contains tests for the Notebook class and Kind enum in the notebook.
 """
 
 import subprocess
+import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
+from marimushka.exceptions import (
+    ExportExecutableNotFoundError,
+    ExportSubprocessError,
+    NotebookInvalidError,
+    NotebookNotFoundError,
+)
 from marimushka.notebook import Kind, Notebook
 
 
@@ -104,8 +113,9 @@ class TestNotebook:
         notebook_path = Path("nonexistent_file.py")
 
         # Mock Path.exists to return False and execute/assert
-        with patch.object(Path, "exists", return_value=False), pytest.raises(FileNotFoundError):
+        with patch.object(Path, "exists", return_value=False), pytest.raises(NotebookNotFoundError) as exc_info:
             Notebook(notebook_path)
+        assert exc_info.value.notebook_path == notebook_path
 
     def test_init_not_a_file(self):
         """Test initialization with a path that is not a file."""
@@ -116,9 +126,11 @@ class TestNotebook:
         with (
             patch.object(Path, "exists", return_value=True),
             patch.object(Path, "is_file", return_value=False),
-            pytest.raises(ValueError),
+            pytest.raises(NotebookInvalidError) as exc_info,
         ):
             Notebook(notebook_path)
+        assert exc_info.value.notebook_path == notebook_path
+        assert "not a file" in exc_info.value.reason
 
     def test_init_not_python_file(self):
         """Test initialization with a non-Python file."""
@@ -130,9 +142,10 @@ class TestNotebook:
             patch.object(Path, "exists", return_value=True),
             patch.object(Path, "is_file", return_value=True),
             patch.object(Path, "suffix", ".txt"),
-            pytest.raises(ValueError),
+            pytest.raises(NotebookInvalidError) as exc_info,
         ):
             Notebook(notebook_path)
+        assert "Python file" in exc_info.value.reason
 
     @patch("subprocess.run")
     def test_to_wasm_success(self, mock_run, resource_dir, tmp_path):
@@ -142,7 +155,7 @@ class TestNotebook:
         output_dir = tmp_path
 
         # Mock successful subprocess run
-        mock_run.return_value = MagicMock(returncode=0)
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         # Create a notebook with mocked path validation
         with (
@@ -156,7 +169,10 @@ class TestNotebook:
             result = notebook.export(output_dir)
 
             # Assert
-            assert result is True
+            assert result.success is True
+            assert result.notebook_path == notebook_path
+            assert result.output_path is not None
+            assert result.error is None
             mock_run.assert_called_once()
 
             # Check that the command includes the notebook-specific flags
@@ -173,7 +189,7 @@ class TestNotebook:
         output_dir = tmp_path
 
         # Mock successful subprocess run
-        mock_run.return_value = MagicMock(returncode=0)
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         # Create a notebook with mocked path validation
         with (
@@ -187,7 +203,8 @@ class TestNotebook:
             result = notebook.export(output_dir)
 
             # Assert
-            assert result is True
+            assert result.success is True
+            assert result.notebook_path == notebook_path
             mock_run.assert_called_once()
 
             # Check that the command includes the app-specific flags
@@ -218,17 +235,19 @@ class TestNotebook:
             result = notebook.export(output_dir)
 
             # Assert
-            assert result is False
+            assert result.success is False
+            assert result.error is not None
+            assert isinstance(result.error, ExportSubprocessError)
 
     @patch("subprocess.run")
-    def test_to_wasm_general_exception(self, mock_run, resource_dir, tmp_path):
-        """Test handling of general exception during export."""
+    def test_to_wasm_file_not_found_error(self, mock_run, resource_dir, tmp_path):
+        """Test handling of FileNotFoundError (executable not found) during export."""
         # Setup
         notebook_path = resource_dir / "notebooks" / "fibonacci.py"
         output_dir = tmp_path
 
-        # Mock general exception
-        mock_run.side_effect = Exception("Unexpected error")
+        # Mock FileNotFoundError (executable not in PATH)
+        mock_run.side_effect = FileNotFoundError("uvx not found")
 
         # Create a notebook with mocked path validation
         with (
@@ -242,7 +261,9 @@ class TestNotebook:
             result = notebook.export(output_dir)
 
             # Assert
-            assert result is False
+            assert result.success is False
+            assert result.error is not None
+            assert isinstance(result.error, ExportExecutableNotFoundError)
 
     @patch("subprocess.run")
     def test_export_no_sandbox(self, mock_run, resource_dir, tmp_path):
@@ -252,7 +273,7 @@ class TestNotebook:
         output_dir = tmp_path
 
         # Mock successful subprocess run
-        mock_run.return_value = MagicMock(returncode=0)
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         # Create a notebook with mocked path validation
         with (
@@ -266,7 +287,7 @@ class TestNotebook:
             result = notebook.export(output_dir, sandbox=False)
 
             # Assert
-            assert result is True
+            assert result.success is True
             mock_run.assert_called_once()
 
             # Check that the command does NOT include --sandbox
@@ -284,7 +305,7 @@ class TestNotebook:
         executable = "uvx"
 
         # Mock successful subprocess run
-        mock_run.return_value = MagicMock(returncode=0)
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         # Mock shutil.which to return the path
         mock_which.return_value = str(bin_path / executable)
 
@@ -300,7 +321,7 @@ class TestNotebook:
             result = notebook.export(output_dir, bin_path=bin_path)
 
             # Assert
-            assert result is True
+            assert result.success is True
             mock_run.assert_called_once()
 
             # Check that the command starts with the combined path
@@ -324,7 +345,7 @@ class TestNotebook:
         # Mock os.access to return True (executable is accessible)
         mock_access.return_value = True
         # Mock successful subprocess run
-        mock_run.return_value = MagicMock(returncode=0)
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
         # Create a notebook with mocked path validation
         with (
@@ -340,7 +361,7 @@ class TestNotebook:
                 result = notebook.export(output_dir, bin_path=bin_path)
 
                 # Assert
-                assert result is True
+                assert result.success is True
                 mock_run.assert_called_once()
 
                 # Check that the command uses the fallback path
@@ -375,7 +396,10 @@ class TestNotebook:
                 result = notebook.export(output_dir, bin_path=bin_path)
 
                 # Assert
-                assert result is False
+                assert result.success is False
+                assert result.error is not None
+                assert isinstance(result.error, ExportExecutableNotFoundError)
+                assert result.error.search_path == bin_path
 
     @patch("subprocess.run")
     def test_export_nonzero_returncode(self, mock_run, resource_dir, tmp_path):
@@ -399,7 +423,11 @@ class TestNotebook:
             result = notebook.export(output_dir)
 
             # Assert
-            assert result is False
+            assert result.success is False
+            assert result.error is not None
+            assert isinstance(result.error, ExportSubprocessError)
+            assert result.error.return_code == 1
+            assert result.error.stderr == "Export failed"
             mock_run.assert_called_once()
 
     def test_display_name(self, resource_dir):
@@ -477,3 +505,131 @@ class TestNotebook:
 
             # Assert
             assert html_path == Path("apps") / "charts.html"
+
+
+class TestKindHypothesis:
+    """Property-based tests for the Kind enum using hypothesis."""
+
+    @given(kind=st.sampled_from(list(Kind)))
+    def test_from_str_roundtrip(self, kind: Kind):
+        """Test that Kind.from_str correctly round-trips all valid Kind values."""
+        result = Kind.from_str(kind.value)
+        assert result == kind
+
+    @given(invalid_value=st.text().filter(lambda x: x not in [k.value for k in Kind]))
+    def test_from_str_rejects_invalid(self, invalid_value: str):
+        """Test that Kind.from_str raises ValueError for any invalid string."""
+        with pytest.raises(ValueError) as exc_info:
+            Kind.from_str(invalid_value)
+        # Use repr() since special characters may be escaped in error message
+        assert repr(invalid_value) in str(exc_info.value)
+
+    @given(kind=st.sampled_from(list(Kind)))
+    def test_command_returns_list_starting_with_marimo(self, kind: Kind):
+        """Test that command property always returns a list starting with 'marimo'."""
+        cmd = kind.command
+        assert isinstance(cmd, list)
+        assert len(cmd) >= 3
+        assert cmd[0] == "marimo"
+        assert cmd[1] == "export"
+
+    @given(kind=st.sampled_from(list(Kind)))
+    def test_html_path_returns_path(self, kind: Kind):
+        """Test that html_path property always returns a valid Path."""
+        path = kind.html_path
+        assert isinstance(path, Path)
+        assert not path.is_absolute()
+
+
+class TestNotebookHypothesis:
+    """Property-based tests for the Notebook class using hypothesis."""
+
+    @given(
+        stem=st.text(
+            alphabet=st.characters(whitelist_categories=("L", "N"), whitelist_characters="_-"),
+            min_size=1,
+            max_size=50,
+        ).filter(lambda x: x.strip() and not x.startswith("-"))
+    )
+    def test_display_name_replaces_underscores(self, stem: str):
+        """Test that display_name replaces all underscores with spaces."""
+        notebook_path = Path(f"{stem}.py")
+
+        with (
+            patch.object(Path, "exists", return_value=True),
+            patch.object(Path, "is_file", return_value=True),
+            patch.object(Path, "suffix", ".py"),
+        ):
+            notebook = Notebook(notebook_path)
+            display_name = notebook.display_name
+
+            assert "_" not in display_name
+            assert display_name == stem.replace("_", " ")
+
+    @given(
+        stem=st.text(
+            alphabet=st.characters(whitelist_categories=("L", "N"), whitelist_characters="_-"),
+            min_size=1,
+            max_size=50,
+        ).filter(lambda x: x.strip() and not x.startswith("-")),
+        kind=st.sampled_from(list(Kind)),
+    )
+    def test_html_path_structure(self, stem: str, kind: Kind):
+        """Test that html_path correctly combines kind's html_path with notebook stem."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            notebook_path = Path(tmp_dir) / f"{stem}.py"
+            notebook_path.touch()
+
+            notebook = Notebook(notebook_path, kind=kind)
+            html_path = notebook.html_path
+
+            assert html_path.suffix == ".html"
+            assert html_path.stem == stem
+            assert html_path.parent == kind.html_path
+
+
+class TestFolder2NotebooksHypothesis:
+    """Property-based tests for folder2notebooks function using hypothesis."""
+
+    @given(kind=st.sampled_from(list(Kind)))
+    def test_empty_folder_returns_empty_list(self, kind: Kind):
+        """Test that None or empty string folder returns empty list for any Kind."""
+        from marimushka.notebook import folder2notebooks
+
+        assert folder2notebooks(None, kind=kind) == []
+        assert folder2notebooks("", kind=kind) == []
+
+    @given(kind=st.sampled_from(list(Kind)))
+    def test_notebooks_have_correct_kind(self, kind: Kind):
+        """Test that all notebooks from folder2notebooks have the specified kind."""
+        from marimushka.notebook import folder2notebooks
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            # Create some test files
+            (tmp_path / "test1.py").touch()
+            (tmp_path / "test2.py").touch()
+            (tmp_path / "not_a_notebook.txt").touch()
+
+            notebooks = folder2notebooks(tmp_path, kind=kind)
+
+            assert len(notebooks) == 2
+            for nb in notebooks:
+                assert nb.kind == kind
+
+    @given(kind=st.sampled_from(list(Kind)))
+    def test_notebooks_are_sorted(self, kind: Kind):
+        """Test that notebooks from folder2notebooks are sorted alphabetically."""
+        from marimushka.notebook import folder2notebooks
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            # Create files in non-alphabetical order
+            (tmp_path / "zebra.py").touch()
+            (tmp_path / "alpha.py").touch()
+            (tmp_path / "middle.py").touch()
+
+            notebooks = folder2notebooks(tmp_path, kind=kind)
+
+            names = [nb.path.name for nb in notebooks]
+            assert names == sorted(names)

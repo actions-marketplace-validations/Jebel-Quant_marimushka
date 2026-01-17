@@ -9,16 +9,21 @@ dependencies = [
     "typer>=0.16.0",
     "jinja2>=3.1.6",
     "loguru>=0.7.3",
-    "rich==14.2.0"
+    "rich>=14.0.0"
 ]
+
+[project.optional-dependencies]
+watch = ["watchfiles>=0.21.0"]
 
 [dependency-groups]
 dev = [
     "beautifulsoup4>=4.12.0",
-    "numpy>=2.4",
+    "numpy>=2.4.1",
     "marimo>=0.18",
     "plotly>=6.5",
-    "pandas>=2.3"
+    "pandas>=2.3",
+    "watchfiles>=0.21.0",
+    "altair>=5.3.0"
 ]
 
 [project.urls]
@@ -41,3 +46,79 @@ include = [
     "README.md",
     "src/marimushka"
 ]
+
+# Coverage configuration
+[tool.coverage.run]
+branch = true
+source = ["src/marimushka"]
+omit = ["*/templates/*"]
+
+[tool.coverage.report]
+fail_under = 100
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+]
+
+# Mypy configuration for static type checking
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_configs = true
+show_error_codes = true
+show_column_numbers = true
+pretty = true
+
+# Package-specific settings
+[[tool.mypy.overrides]]
+module = "marimushka.*"
+disallow_untyped_defs = true
+
+# Third-party libraries without stubs
+[[tool.mypy.overrides]]
+module = [
+    "jinja2",
+    "jinja2.*",
+    "loguru",
+    "rich",
+    "rich.*",
+    "typer",
+    "watchfiles",
+]
+ignore_missing_imports = true
+
+# Mutation testing configuration
+[tool.mutmut]
+paths_to_mutate = "src/marimushka/"
+tests_dir = "tests/"
+runner = "python -m pytest -x --tb=no -q"
+
+# Documentation coverage configuration
+[tool.interrogate]
+ignore-init-method = false
+ignore-init-module = false
+ignore-magic = false
+ignore-semiprivate = false
+ignore-private = false
+ignore-property-decorators = false
+ignore-module = false
+ignore-nested-functions = false
+ignore-nested-classes = false
+ignore-setters = false
+fail-under = 95
+exclude = ["tests", "setup.py"]
+verbose = 0
+quiet = false
+color = true
+generate-badge = "."
+badge-format = "svg"
