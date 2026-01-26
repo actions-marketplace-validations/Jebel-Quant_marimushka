@@ -63,7 +63,7 @@ import jinja2
 import typer
 from loguru import logger
 from rich import print as rich_print
-from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
+from rich.progress import BarColumn, Progress, SpinnerColumn, TaskID, TaskProgressColumn, TextColumn
 
 from . import __version__
 from .exceptions import (
@@ -75,6 +75,9 @@ from .exceptions import (
     TemplateRenderError,
 )
 from .notebook import Kind, Notebook, folder2notebooks
+
+# Maximum number of changed files to display in watch mode
+_MAX_CHANGED_FILES_TO_DISPLAY = 5
 
 # Configure logger
 logger.configure(extra={"subprocess": ""})
@@ -135,7 +138,7 @@ def _export_notebooks_parallel(
     bin_path: Path | None,
     max_workers: int = 4,
     progress: Progress | None = None,
-    task_id: int | None = None,
+    task_id: TaskID | None = None,
 ) -> BatchExportResult:
     """Export notebooks in parallel using a thread pool.
 
@@ -174,7 +177,7 @@ def _export_notebooks_parallel(
     return batch_result
 
 
-@app.callback(invoke_without_command=True)  # type: ignore[misc]
+@app.callback(invoke_without_command=True)  # type: ignore[untyped-decorator]
 def callback(ctx: typer.Context) -> None:
     """Handle the CLI invocation without a subcommand.
 
@@ -491,7 +494,7 @@ def main(
     )
 
 
-@app.command(name="export")  # type: ignore[misc]
+@app.command(name="export")  # type: ignore[untyped-decorator]
 def _main_typer(
     output: str = typer.Option("_site", "--output", "-o", help="Directory where the exported files will be saved"),
     template: str = typer.Option(
@@ -547,7 +550,7 @@ def _main_typer(
     )
 
 
-@app.command(name="watch")  # type: ignore[misc]
+@app.command(name="watch")  # type: ignore[untyped-decorator]
 def watch(
     output: str = typer.Option("_site", "--output", "-o", help="Directory where the exported files will be saved"),
     template: str = typer.Option(
@@ -621,10 +624,10 @@ def watch(
         for changes in watchfiles_watch(*watch_paths):  # pragma: no cover
             changed_files = [str(change[1]) for change in changes]
             rich_print("\n[bold yellow]Detected changes:[/bold yellow]")
-            for f in changed_files[:5]:  # Show first 5 changed files
+            for f in changed_files[:_MAX_CHANGED_FILES_TO_DISPLAY]:
                 rich_print(f"  [dim]{f}[/dim]")
-            if len(changed_files) > 5:
-                rich_print(f"  [dim]... and {len(changed_files) - 5} more[/dim]")
+            if len(changed_files) > _MAX_CHANGED_FILES_TO_DISPLAY:
+                rich_print(f"  [dim]... and {len(changed_files) - _MAX_CHANGED_FILES_TO_DISPLAY} more[/dim]")
 
             rich_print("[bold blue]Re-exporting...[/bold blue]")
             main(
@@ -643,7 +646,7 @@ def watch(
         rich_print("\n[bold green]Watch mode stopped.[/bold green]")
 
 
-@app.command(name="version")  # type: ignore[misc]
+@app.command(name="version")  # type: ignore[untyped-decorator]
 def version() -> None:
     """Display the current version of Marimushka.
 

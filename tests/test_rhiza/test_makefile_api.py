@@ -15,6 +15,7 @@ MAKE = shutil.which("make") or "/usr/bin/make"
 REQUIRED_FILES = [
     "Makefile",
     "pyproject.toml",
+    "README.md",  # is needed to do uv sync, etc.
 ]
 
 # Folders to copy recursively
@@ -90,7 +91,7 @@ def setup_api_env(logger, root, tmp_path: Path):
         os.chdir(old_cwd)
 
 
-def run_make(args: list[str] = None, dry_run: bool = True) -> subprocess.CompletedProcess:
+def run_make(args: list[str] | None = None, dry_run: bool = True) -> subprocess.CompletedProcess:
     """Run make in the current directory."""
     cmd = [MAKE]
     if dry_run:

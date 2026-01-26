@@ -42,7 +42,7 @@ Example::
 import dataclasses
 import os
 import shutil
-import subprocess
+import subprocess  # nosec B404
 from enum import Enum
 from pathlib import Path
 
@@ -101,11 +101,23 @@ class Kind(Enum):
         Raises:
             ValueError: If the input string does not match any valid Kind value.
 
+        Examples:
+            >>> from marimushka.notebook import Kind
+            >>> Kind.from_str("notebook")
+            <Kind.NB: 'notebook'>
+            >>> Kind.from_str("app")
+            <Kind.APP: 'app'>
+            >>> Kind.from_str("invalid")
+            Traceback (most recent call last):
+                ...
+            ValueError: Invalid Kind: 'invalid'. Must be one of ['notebook', 'notebook_wasm', 'app']
+
         """
         try:
             return Kind(value)
         except ValueError as e:
-            raise ValueError(f"Invalid Kind: {value!r}. Must be one of {[k.value for k in Kind]}") from e
+            msg = f"Invalid Kind: {value!r}. Must be one of {[k.value for k in Kind]}"
+            raise ValueError(msg) from e
 
     @property
     def command(self) -> list[str]:
@@ -119,6 +131,13 @@ class Kind(Enum):
 
         Returns:
             list[str]: A list of command strings for the corresponding Kind instance.
+
+        Examples:
+            >>> from marimushka.notebook import Kind
+            >>> Kind.NB.command
+            ['marimo', 'export', 'html']
+            >>> Kind.APP.command
+            ['marimo', 'export', 'html-wasm', '--mode', 'run', '--no-show-code']
 
         """
         commands = {
@@ -139,6 +158,14 @@ class Kind(Enum):
             current kind.
 
         @rtype: Path
+
+        Examples:
+            >>> from marimushka.notebook import Kind
+            >>> str(Kind.NB.html_path)
+            'notebooks'
+            >>> str(Kind.APP.html_path)
+            'apps'
+
         """
         paths = {
             Kind.NB: Path("notebooks"),
@@ -242,7 +269,7 @@ class Notebook:
         try:
             # Run marimo export command
             logger.debug(f"Running command: {cmd}")
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, check=False)  # nosec B603
 
             nb_logger = logger.bind(subprocess=f"[{self.path.name}] ")
 
@@ -282,7 +309,22 @@ class Notebook:
 
     @property
     def display_name(self) -> str:
-        """Return the display name for the notebook."""
+        """Return the display name for the notebook.
+
+        The display name is derived from the notebook filename by replacing
+        underscores with spaces, making it more human-readable.
+
+        Returns:
+            str: Human-friendly display name with underscores replaced by spaces.
+
+        Examples:
+            >>> # Demonstrating the transformation logic
+            >>> filename = "my_cool_notebook"
+            >>> display_name = filename.replace("_", " ")
+            >>> display_name
+            'my cool notebook'
+
+        """
         return self.path.stem.replace("_", " ")
 
     @property
@@ -331,6 +373,15 @@ def folder2notebooks(folder: Path | str | None, kind: Kind = Kind.NB) -> list[No
         # Handle empty or missing directories gracefully
         empty = folder2notebooks(None)  # Returns []
         empty = folder2notebooks("")    # Returns []
+
+    Examples:
+        >>> from marimushka.notebook import folder2notebooks
+        >>> # When folder is None, returns empty list
+        >>> folder2notebooks(None)
+        []
+        >>> # When folder is empty string, returns empty list
+        >>> folder2notebooks("")
+        []
 
     """
     if folder is None or folder == "":
