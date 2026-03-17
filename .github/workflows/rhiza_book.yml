@@ -36,7 +36,7 @@ jobs:
 
     steps:
       # Check out the repository code
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v3.6.0
         with:
           lfs: true
 
