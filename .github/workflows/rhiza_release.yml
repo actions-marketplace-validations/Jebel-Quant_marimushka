@@ -84,7 +84,7 @@ jobs:
       tag: ${{ steps.set_tag.outputs.tag }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@v3.6.0
         with:
           fetch-depth: 0
 
@@ -115,7 +115,7 @@ jobs:
     needs: tag
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@v3.6.0
         with:
           fetch-depth: 0
 
@@ -225,14 +225,14 @@ jobs:
     steps:
       - name: Download SBOM artifact
         # Downloads sbom.cdx.json and sbom.cdx.xml into sbom/ directory
-        uses: actions/download-artifact@v8.0.0
+        uses: actions/download-artifact@v8.0.1
         with:
           name: sbom
           path: sbom
         continue-on-error: true
 
       - name: Create GitHub Release with artifacts
-        uses: softprops/action-gh-release@v2.5.0
+        uses: softprops/action-gh-release@v2.6.1
         with:
           tag_name: ${{ needs.tag.outputs.tag }}
           name: ${{ needs.tag.outputs.tag }}
@@ -252,12 +252,12 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@v3.6.0
         with:
           fetch-depth: 0
 
       - name: Download dist artifact
-        uses: actions/download-artifact@v8.0.0
+        uses: actions/download-artifact@v8.0.1
         with:
           name: dist
           path: dist
@@ -300,7 +300,7 @@ jobs:
       image_name: ${{ steps.image_name.outputs.image_name }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@v3.6.0
         with:
           fetch-depth: 0
 
@@ -385,7 +385,7 @@ jobs:
     if: needs.pypi.result == 'success' || needs.devcontainer.result == 'success'
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@v3.6.0
         with:
           fetch-depth: 0
 
@@ -443,7 +443,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Publish Release
-        uses: softprops/action-gh-release@v2.5.0
+        uses: softprops/action-gh-release@v2.6.1
         with:
           tag_name: ${{ needs.tag.outputs.tag }}
           draft: false
