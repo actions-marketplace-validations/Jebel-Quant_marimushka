@@ -1,11 +1,11 @@
 <div align="center">
   
-# <img src="https://raw.githubusercontent.com/Jebel-Quant/rhiza/main/assets/rhiza-logo.svg" alt="Rhiza Logo" width="30"> marimushka
-![Synced with Rhiza](https://img.shields.io/badge/synced%20with-rhiza-2FA4A9?color=2FA4A9)
+# <img src="https://raw.githubusercontent.com/Jebel-Quant/rhiza/main/.rhiza/assets/rhiza-logo.svg" alt="Rhiza Logo" width="30"> marimushka
+[![Rhiza](https://img.shields.io/badge/dynamic/yaml?url=https%3A%2F%2Fraw.githubusercontent.com%2FJebel-Quant%2Fmarimushka%2Fmain%2F.rhiza%2Ftemplate.yml&query=%24.ref&label=rhiza&color=2FA4A9)](https://github.com/jebel-quant/rhiza)
 
 [![PyPI version](https://img.shields.io/pypi/v/marimushka.svg)](https://pypi.org/project/marimushka/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python Version](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
+[![Python Version](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
 [![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/jebel-quant/marimushka/rhiza_release.yml?label=release)](https://github.com/jebel-quant/marimushka/actions/workflows/rhiza_release.yml)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 [![CodeFactor](https://www.codefactor.io/repository/github/jebel-quant/marimushka/badge)](https://www.codefactor.io/repository/github/jebel-quant/marimushka)
@@ -19,6 +19,8 @@ Export [marimo](https://marimo.io) notebooks in style.
 
 
 ## 🚀 Overview
+
+![Marimushka index page](docs/assets/screenshot.png)
 
 Marimushka is a powerful tool for exporting [marimo](https://marimo.io) notebooks
 to HTML/WebAssembly format with custom styling. It helps you create beautiful,
@@ -39,11 +41,18 @@ with a web browser - no Python installation required!
 - 🌐 **Generate an index page** that lists all your notebooks and apps
 - 🔄 **Integrate with GitHub Actions** for automated deployment
 - 🔍 **Recursive directory scanning** to find all notebooks in a project
-- 🧩 **Flexible configuration** with command-line options and Python API
+- 🧩 **Flexible configuration** with command-line options, Python API, and config files
+- 🔒 **Security-first design** with multiple protection layers
+  - Path traversal protection
+  - TOCTOU race condition prevention
+  - DoS protections (file size limits, timeouts, worker bounds)
+  - Error message sanitization
+  - Audit logging for security events
+  - Secure file permissions
 
 ## 📋 Requirements
 
-- Python 3.10+
+- Python 3.11+
 - [marimo](https://marimo.io) (installed automatically as a dependency)
 - [uvx](https://docs.astral.sh/uv/guides/tools/) (recommended to bypass installation)
 
@@ -85,6 +94,29 @@ uvx marimushka export --notebooks path/to/notebooks --apps path/to/apps
 uvx marimushka export --no-sandbox
 ```
 
+### Configuration File
+
+Marimushka supports configuration via a `.marimushka.toml` file in your project root:
+
+```toml
+[marimushka]
+output = "_site"
+notebooks = "notebooks"
+apps = "apps"
+sandbox = true
+parallel = true
+max_workers = 4
+timeout = 300
+
+[marimushka.security]
+audit_enabled = true
+audit_log = ".marimushka-audit.log"
+max_file_size_mb = 10
+file_permissions = "0o644"
+```
+
+See `.marimushka.toml.example` in the repository for a complete example with documentation.
+
 ### Project Structure
 
 Marimushka recommends your project to have the following structure
@@ -96,8 +128,8 @@ your-project/
 ├── notebooks/       # Static marimo notebooks (.py files)
 ├── notebooks_wasm/  # Interactive marimo notebooks (.py files)
 ├── apps/            # Marimo applications (.py files)
-└── templates/       # Optional: Custom templates for export
-    └── custom.html.j2   # Default template location
+└── custom-templates/  # Optional: Custom templates for export
+    └── custom.html.j2   # Your custom template
 ```
 
 ### Marimo Notebook Requirements
@@ -189,6 +221,185 @@ jobs:
           branch: gh-pages
 ```
 
+### Advanced CI/CD Patterns
+
+#### GitLab CI Integration
+
+Marimushka works seamlessly with GitLab CI/CD:
+
+```yaml
+# .gitlab-ci.yml
+stages:
+  - export
+  - deploy
+
+export-notebooks:
+  stage: export
+  image: python:3.11
+  script:
+    - pip install uv
+    - uvx marimushka export --output public
+  artifacts:
+    paths:
+      - public
+  only:
+    - main
+
+pages:
+  stage: deploy
+  dependencies:
+    - export-notebooks
+  script:
+    - echo "Deploying to GitLab Pages"
+  artifacts:
+    paths:
+      - public
+  only:
+    - main
+```
+
+#### CircleCI Integration
+
+```yaml
+# .circleci/config.yml
+version: 2.1
+
+jobs:
+  export:
+    docker:
+      - image: cimg/python:3.11
+    steps:
+      - checkout
+      - run:
+          name: Install dependencies
+          command: pip install uv
+      - run:
+          name: Export notebooks
+          command: uvx marimushka export
+      - persist_to_workspace:
+          root: .
+          paths:
+            - _site
+      - store_artifacts:
+          path: _site
+          destination: notebooks
+
+workflows:
+  main:
+    jobs:
+      - export
+```
+
+#### Netlify Integration
+
+Deploy directly to Netlify from GitHub Actions:
+
+```yaml
+# .github/workflows/netlify.yml
+name: Deploy to Netlify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Export notebooks
+        uses: jebel-quant/marimushka@v0.2.1
+      
+      - name: Deploy to Netlify
+        uses: nwtgck/actions-netlify@v2
+        with:
+          publish-dir: artifacts/marimushka
+          production-branch: main
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          deploy-message: "Deploy from GitHub Actions"
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+```
+
+#### Vercel Integration
+
+Deploy to Vercel using GitHub Actions:
+
+```yaml
+# .github/workflows/vercel.yml
+name: Deploy to Vercel
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Export notebooks
+        uses: jebel-quant/marimushka@v0.2.1
+      
+      - name: Deploy to Vercel
+        uses: amondnet/vercel-action@v25
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          working-directory: artifacts/marimushka
+```
+
+#### AWS S3 + CloudFront
+
+Deploy to AWS infrastructure:
+
+```yaml
+# .github/workflows/aws.yml
+name: Deploy to AWS
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Export notebooks
+        uses: jebel-quant/marimushka@v0.2.1
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+      
+      - name: Sync to S3
+        run: |
+          aws s3 sync artifacts/marimushka/ s3://${{ secrets.S3_BUCKET }}/notebooks/ \
+            --delete \
+            --cache-control "public, max-age=3600"
+      
+      - name: Invalidate CloudFront
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ secrets.CLOUDFRONT_DIST_ID }} \
+            --paths "/*"
+```
+
+**For more CI/CD recipes and patterns**, see:
+- [RECIPES.md](RECIPES.md#cicd-integration) - Comprehensive recipes and examples
+- [FAQ.md](FAQ.md#deployment--cicd) - Common deployment questions
+- [TROUBLESHOOTING.md](TROUBLESHOOTING.md#github-action-issues) - CI/CD troubleshooting
+
 ## 🎨 Customizing Templates
 
 Marimushka uses Jinja2 templates to generate the 'index.html' file.
@@ -246,6 +457,16 @@ Example template structure:
 </html>
 ```
 
+## 🔒 Security
+
+Marimushka is designed with security as a priority. See [SECURITY.md](SECURITY.md) for details on:
+
+- Security features and protections
+- Best practices for secure deployment
+- Configuration options for enhanced security
+- Audit logging
+- Vulnerability reporting
+
 ## 👥 Contributing
 
 Contributions are welcome! Here's how you can contribute:
@@ -272,6 +493,64 @@ make test
 # Run linting and formatting
 make fmt
 ```
+
+## 📚 Documentation
+
+Marimushka has comprehensive documentation to help you get the most out of it:
+
+### Core Documentation
+
+- **[README.md](README.md)** - This file. Getting started guide and feature overview
+- **[CHANGELOG.md](CHANGELOG.md)** - Detailed version history with migration notes
+- **[MIGRATION.md](docs/MIGRATION.md)** - Version upgrade guides with code examples
+- **[API.md](API.md)** - Complete Python API reference for programmatic usage
+
+### User Guides
+
+- **[TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)** - Common issues and solutions
+  - Installation problems
+  - Export failures
+  - Template errors
+  - Performance issues
+  - GitHub Action troubleshooting
+  
+- **[RECIPES.md](docs/RECIPES.md)** - Real-world usage patterns and examples
+  - Basic workflows
+  - CI/CD integration (GitHub, GitLab, CircleCI)
+  - Custom templates
+  - Advanced patterns
+  - Deployment strategies
+  
+- **[FAQ.md](docs/FAQ.md)** - Frequently asked questions
+  - Quick answers to 50+ common questions
+  - Organized by topic
+  - Search-friendly format
+
+### Configuration
+
+- **[.marimushka.toml.example](.marimushka.toml.example)** - Configuration file example
+- **[src/marimushka/templates/README.md](src/marimushka/templates/README.md)** - Template customization guide
+
+### Security & Contributing
+
+- **[SECURITY.md](SECURITY.md)** - Security features, best practices, and reporting
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** - How to contribute to the project
+- **[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)** - Community guidelines
+
+### Quick Links
+
+| I want to... | See... |
+|-------------|--------|
+| Get started quickly | [README.md - Installation](#-installation) |
+| Fix an error | [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) |
+| See real examples | [RECIPES.md](docs/RECIPES.md) |
+| Find a quick answer | [FAQ.md](docs/FAQ.md) |
+| Upgrade versions | [MIGRATION.md](docs/MIGRATION.md) |
+| Use the Python API | [API.md](API.md) |
+| Deploy to GitHub Pages | [README.md - GitHub Action](#github-action) |
+| Customize templates | [src/marimushka/templates/README.md](src/marimushka/templates/README.md) |
+| Report a security issue | [SECURITY.md](SECURITY.md#reporting-a-vulnerability) |
+| Contribute | [CONTRIBUTING.md](CONTRIBUTING.md) |
 
 ## 📄 License
 

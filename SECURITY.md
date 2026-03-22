@@ -2,51 +2,99 @@
 
 ## Supported Versions
 
+We actively support the following versions with security updates:
+
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.2.x   | :white_check_mark: |
-| 0.1.x   | :x:                |
-| < 0.1   | :x:                |
+| 0.8.x   | :white_check_mark: |
+| 0.7.x   | :white_check_mark: |
+| < 0.7   | :x:                |
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in Marimushka, please report it responsibly:
+We take security vulnerabilities seriously. If you discover a security issue, please report it responsibly.
 
-1. **Do not** open a public GitHub issue for security vulnerabilities
-2. Email the maintainers at [contact@jqr.ae](mailto:contact@jqr.ae) with:
-   - A description of the vulnerability
-   - Steps to reproduce the issue
-   - Potential impact assessment
-   - Any suggested fixes (optional)
+### How to Report
 
-## Response Timeline
+**Do NOT report security vulnerabilities through public GitHub issues.**
 
-- **Acknowledgment**: Within 48 hours
-- **Initial assessment**: Within 7 days
-- **Resolution target**: Within 30 days for critical issues
+Instead, please report them via one of the following methods:
 
-## Security Considerations
+1. **GitHub Security Advisories** (Preferred)
+   - Go to the [Security Advisories](https://github.com/jebel-quant/rhiza/security/advisories) page
+   - Click "New draft security advisory"
+   - Fill in the details and submit
 
-### Subprocess Execution
+2. **Email**
+   - Send details to the repository maintainers
+   - Include "SECURITY" in the subject line
 
-Marimushka executes `uvx marimo export` as a subprocess. The tool:
-- Only processes `.py` files from specified directories
-- Does not execute arbitrary user input as shell commands
-- Uses `subprocess.run()` with explicit argument lists (no shell=True)
+### What to Include
 
-### Sandbox Mode
+Please include the following information in your report:
 
-By default, notebooks are exported with `--sandbox` flag, which:
-- Runs exports in an isolated environment
-- Prevents access to the local filesystem beyond the notebook
-- Requires dependencies to be declared in the notebook metadata
+- **Description**: A clear description of the vulnerability
+- **Impact**: The potential impact of the vulnerability
+- **Steps to Reproduce**: Detailed steps to reproduce the issue
+- **Affected Versions**: Which versions are affected
+- **Suggested Fix**: If you have one (optional)
 
-To maintain security, avoid using `--no-sandbox` in production CI/CD pipelines unless necessary.
+### What to Expect
 
-### Template Rendering
+- **Acknowledgment**: We will acknowledge receipt within 48 hours
+- **Initial Assessment**: We will provide an initial assessment within 7 days
+- **Resolution Timeline**: We aim to resolve critical issues within 30 days
+- **Credit**: We will credit reporters in the security advisory (unless you prefer to remain anonymous)
 
-Jinja2 templates are rendered with `autoescape` enabled for HTML/XML content, mitigating XSS risks in generated index pages.
+### Scope
 
-## Security Updates
+This security policy applies to:
 
-Security patches are released as part of regular version updates. Subscribe to GitHub releases to stay informed.
+- The Rhiza template system and configuration files
+- GitHub Actions workflows provided by this repository
+- Shell scripts in `.rhiza/scripts/`
+- Python utilities in `.rhiza/utils/`
+
+### Out of Scope
+
+The following are generally out of scope:
+
+- Vulnerabilities in upstream dependencies (report these to the respective projects)
+- Issues that require physical access to a user's machine
+- Social engineering attacks
+- Denial of service attacks that require significant resources
+
+## Security Measures
+
+This project implements several security measures:
+
+### Code Scanning
+- **CodeQL**: Automated code scanning for Python and GitHub Actions
+- **Bandit**: Python security linter integrated in CI and pre-commit
+- **pip-audit**: Dependency vulnerability scanning
+- **Secret Scanning**: GitHub secret scanning enabled on this repository
+
+### Supply Chain Security
+- **SLSA Provenance**: Build attestations for release artifacts (public repositories only)
+- **Locked Dependencies**: `uv.lock` ensures reproducible builds
+- **Dependabot**: Automated dependency updates with security patches (version and security updates)
+- **Renovate**: Additional automated dependency update management
+
+### Release Security
+- **OIDC Publishing**: PyPI trusted publishing without stored credentials
+- **Signed Commits**: GPG signing supported for releases
+- **Tag Protection**: Releases require version tag validation
+
+## Security Best Practices for Users
+
+When using Rhiza templates in your projects:
+
+1. **Keep Updated**: Regularly sync with upstream templates
+2. **Review Changes**: Review template sync PRs before merging
+3. **Enable Security Features**: Enable CodeQL, secret scanning, and Dependabot in your repositories
+4. **Use Locked Dependencies**: Always commit `uv.lock` for reproducible builds
+5. **Configure Branch Protection**: Require PR reviews and status checks
+
+## Acknowledgments
+
+We thank the security researchers and community members who help keep Rhiza secure.

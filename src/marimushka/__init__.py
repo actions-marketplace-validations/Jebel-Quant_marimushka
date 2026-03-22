@@ -42,6 +42,12 @@ Exports:
 
 import importlib.metadata
 
+from .dependencies import (
+    Dependencies,
+    create_dependencies,
+    create_dependencies_from_config_file,
+    create_test_dependencies,
+)
 from .exceptions import (
     BatchExportResult,
     ExportError,
@@ -54,6 +60,7 @@ from .exceptions import (
     NotebookInvalidError,
     NotebookNotFoundError,
     OutputError,
+    ProgressCallback,
     TemplateError,
     TemplateInvalidError,
     TemplateNotFoundError,
@@ -64,6 +71,8 @@ __version__ = importlib.metadata.version("marimushka")
 
 __all__ = [
     "BatchExportResult",
+    # Dependency injection
+    "Dependencies",
     # Export exceptions
     "ExportError",
     "ExportExecutableNotFoundError",
@@ -79,10 +88,15 @@ __all__ = [
     "NotebookNotFoundError",
     # Output exceptions
     "OutputError",
+    # Progress callback
+    "ProgressCallback",
     # Template exceptions
     "TemplateError",
     "TemplateInvalidError",
     "TemplateNotFoundError",
     "TemplateRenderError",
     "__version__",
+    "create_dependencies",
+    "create_dependencies_from_config_file",
+    "create_test_dependencies",
 ]

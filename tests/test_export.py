@@ -11,7 +11,7 @@ This module contains tests for the functions in the export.py module:
 
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, mock_open, patch
+from unittest.mock import ANY, MagicMock, mock_open, patch
 
 import jinja2
 import pytest
@@ -19,6 +19,7 @@ import typer
 from hypothesis import given
 from hypothesis import strategies as st
 
+from marimushka.audit import get_audit_logger
 from marimushka.exceptions import (
     BatchExportResult,
     ExportSubprocessError,
@@ -28,14 +29,15 @@ from marimushka.exceptions import (
     TemplateNotFoundError,
     TemplateRenderError,
 )
-from marimushka.export import (
-    _export_notebook,
-    _export_notebooks_parallel,
-    _generate_index,
-    _validate_template,
-    main,
-)
+from marimushka.export import main
 from marimushka.notebook import Kind, folder2notebooks
+from marimushka.orchestrator import (
+    export_notebook,
+    export_notebooks_parallel,
+    export_notebooks_sequential,
+    generate_index,
+)
+from marimushka.validators import validate_template
 
 
 class TestFolder2Notebooks:
@@ -103,7 +105,7 @@ class TestValidateTemplate:
         template_file.write_text("<html></html>")
 
         # Execute - should not raise
-        _validate_template(template_file)
+        validate_template(template_file, get_audit_logger())
 
     def test_validate_template_jinja2_extension(self, tmp_path):
         """Test template validation with .jinja2 extension."""
@@ -112,7 +114,7 @@ class TestValidateTemplate:
         template_file.write_text("<html></html>")
 
         # Execute - should not raise
-        _validate_template(template_file)
+        validate_template(template_file, get_audit_logger())
 
     def test_validate_template_not_found(self, tmp_path):
         """Test template validation when file not found."""
@@ -121,7 +123,7 @@ class TestValidateTemplate:
 
         # Execute and Assert
         with pytest.raises(TemplateNotFoundError) as exc_info:
-            _validate_template(template_file)
+            validate_template(template_file, get_audit_logger())
         assert exc_info.value.template_path == template_file
 
     def test_validate_template_not_a_file(self, tmp_path):
@@ -132,7 +134,7 @@ class TestValidateTemplate:
 
         # Execute and Assert
         with pytest.raises(TemplateInvalidError) as exc_info:
-            _validate_template(template_dir)
+            validate_template(template_dir, get_audit_logger())
         assert exc_info.value.template_path == template_dir
         assert "not a file" in exc_info.value.reason
 
@@ -143,10 +145,55 @@ class TestValidateTemplate:
         template_file.write_text("<html></html>")
 
         # Execute - should not raise but should log warning
-        _validate_template(template_file)
+        validate_template(template_file, get_audit_logger())
 
         # The warning is logged via loguru, which doesn't use caplog
         # Just verify no exception was raised
+
+    def test_validate_template_path_traversal(self, tmp_path):
+        """Test template validation detects path traversal."""
+        # Setup
+        base_dir = tmp_path / "base"
+        base_dir.mkdir()
+        template_file = tmp_path / "base" / "templates" / "template.html.j2"
+        template_file.parent.mkdir(parents=True)
+        template_file.write_text("<html></html>")
+
+        # Create a path that tries to escape
+        base_dir / ".." / ".." / "etc" / "passwd.j2"
+
+        # Mock validate_path_traversal to raise ValueError
+        with patch("marimushka.validators.validate_path_traversal", side_effect=ValueError("path traversal detected")):
+            # Execute and Assert
+            with pytest.raises(TemplateInvalidError) as exc_info:
+                validate_template(template_file, get_audit_logger())
+            assert "path traversal detected" in exc_info.value.reason
+
+    def test_validate_template_oserror(self, tmp_path):
+        """Test template validation handles OSError when accessing file."""
+        # Setup
+        template_file = tmp_path / "template.html.j2"
+        template_file.write_text("<html></html>")
+
+        # Mock stat to raise OSError (e.g., permission denied)
+        with patch.object(Path, "stat", side_effect=OSError("Permission denied")):
+            # Execute and Assert
+            with pytest.raises(TemplateInvalidError) as exc_info:
+                validate_template(template_file, get_audit_logger())
+            assert "cannot access file" in exc_info.value.reason
+
+    def test_validate_template_file_size_exceeded(self, tmp_path):
+        """Test template validation detects file size limit exceeded."""
+        # Setup
+        template_file = tmp_path / "large_template.html.j2"
+        template_file.write_text("<html></html>")
+
+        # Mock validate_file_size to raise ValueError
+        with patch("marimushka.validators.validate_file_size", side_effect=ValueError("File size exceeds limit")):
+            # Execute and Assert
+            with pytest.raises(TemplateInvalidError) as exc_info:
+                validate_template(template_file, get_audit_logger())
+            assert "file size limit exceeded" in exc_info.value.reason
 
 
 class TestExportNotebook:
@@ -161,12 +208,12 @@ class TestExportNotebook:
         output_dir = Path("/output")
 
         # Execute
-        result = _export_notebook(mock_notebook, output_dir, sandbox=True, bin_path=None)
+        result = export_notebook(mock_notebook, output_dir, sandbox=True, bin_path=None)
 
         # Assert
         assert result is mock_result
         assert result.success is True
-        mock_notebook.export.assert_called_once_with(output_dir=output_dir, sandbox=True, bin_path=None)
+        mock_notebook.export.assert_called_once_with(output_dir=output_dir, sandbox=True, bin_path=None, timeout=300)
 
     def test_export_notebook_failure(self):
         """Test notebook export failure."""
@@ -177,7 +224,7 @@ class TestExportNotebook:
         output_dir = Path("/output")
 
         # Execute
-        result = _export_notebook(mock_notebook, output_dir, sandbox=False, bin_path=Path("/bin"))
+        result = export_notebook(mock_notebook, output_dir, sandbox=False, bin_path=Path("/bin"))
 
         # Assert
         assert result is mock_result
@@ -190,7 +237,7 @@ class TestExportNotebooksParallel:
     def test_export_notebooks_parallel_empty(self):
         """Test parallel export with empty list."""
         # Execute
-        result = _export_notebooks_parallel([], Path("/output"), True, None)
+        result = export_notebooks_parallel([], Path("/output"), True, None)
 
         # Assert
         assert isinstance(result, BatchExportResult)
@@ -208,7 +255,7 @@ class TestExportNotebooksParallel:
             mock_notebooks.append(nb)
 
         # Execute
-        result = _export_notebooks_parallel(mock_notebooks, Path("/output"), True, None, max_workers=2)
+        result = export_notebooks_parallel(mock_notebooks, Path("/output"), True, None, max_workers=2)
 
         # Assert
         assert isinstance(result, BatchExportResult)
@@ -238,7 +285,7 @@ class TestExportNotebooksParallel:
             mock_notebooks.append(nb)
 
         # Execute
-        result = _export_notebooks_parallel(mock_notebooks, Path("/output"), True, None, max_workers=2)
+        result = export_notebooks_parallel(mock_notebooks, Path("/output"), True, None, max_workers=2)
 
         # Assert
         assert isinstance(result, BatchExportResult)
@@ -247,12 +294,51 @@ class TestExportNotebooksParallel:
         assert result.all_succeeded is False
 
 
+class TestExportNotebooksSequential:
+    """Tests for the _export_notebooks_sequential function."""
+
+    def test_export_notebooks_sequential_without_progress(self):
+        """Test sequential export without progress tracking (progress=None)."""
+        # Setup
+        mock_notebooks = []
+        for i in range(3):
+            nb = MagicMock()
+            nb.path = Path(f"/nb{i}.py")
+            nb.export.return_value = NotebookExportResult.succeeded(Path(f"/nb{i}.py"), Path(f"/output/nb{i}.html"))
+            mock_notebooks.append(nb)
+
+        # Execute - explicitly pass progress=None to cover the branch
+        result = export_notebooks_sequential(
+            mock_notebooks, Path("/output"), sandbox=True, bin_path=None, progress=None, task_id=None
+        )
+
+        # Assert
+        assert isinstance(result, BatchExportResult)
+        assert result.succeeded == 3
+        assert result.failed == 0
+        assert result.all_succeeded is True
+        # Verify all notebooks were exported
+        for nb in mock_notebooks:
+            nb.export.assert_called_once_with(output_dir=Path("/output"), sandbox=True, bin_path=None, timeout=300)
+
+    def test_export_notebooks_sequential_empty_list(self):
+        """Test sequential export with empty list."""
+        # Execute
+        result = export_notebooks_sequential([], Path("/output"), sandbox=True, bin_path=None)
+
+        # Assert
+        assert isinstance(result, BatchExportResult)
+        assert result.succeeded == 0
+        assert result.failed == 0
+
+
 class TestGenerateIndex:
     """Tests for the _generate_index function."""
 
+    @patch("marimushka.orchestrator.set_secure_file_permissions")
     @patch.object(Path, "open", new_callable=mock_open)
-    @patch("jinja2.Environment")
-    def test_generate_index_success(self, mock_env, mock_file_open, tmp_path):
+    @patch("marimushka.orchestrator.SandboxedEnvironment")
+    def test_generate_index_success(self, mock_env, mock_file_open, mock_permissions, tmp_path):
         """Test the successful generation of index.html."""
         # Setup
         output_dir = tmp_path / "output"
@@ -282,7 +368,7 @@ class TestGenerateIndex:
         mock_template.render.return_value = "<html>Rendered content</html>"
 
         # Execute with parallel=False for predictable test behavior
-        result = _generate_index(
+        result = generate_index(
             output=output_dir,
             template_file=template_file,
             notebooks=notebooks,
@@ -293,22 +379,28 @@ class TestGenerateIndex:
 
         # Assert
         # Check that export was called for each notebook and app
-        mock_notebook1.export.assert_called_once_with(output_dir=output_dir / "notebooks", sandbox=True, bin_path=None)
-        mock_notebook2.export.assert_called_once_with(output_dir=output_dir / "notebooks", sandbox=True, bin_path=None)
-        mock_app1.export.assert_called_once_with(output_dir=output_dir / "apps", sandbox=True, bin_path=None)
+        mock_notebook1.export.assert_called_once_with(
+            output_dir=output_dir / "notebooks", sandbox=True, bin_path=None, timeout=300
+        )
+        mock_notebook2.export.assert_called_once_with(
+            output_dir=output_dir / "notebooks", sandbox=True, bin_path=None, timeout=300
+        )
+        mock_app1.export.assert_called_once_with(
+            output_dir=output_dir / "apps", sandbox=True, bin_path=None, timeout=300
+        )
 
         # Check that the template was rendered and written to file
         mock_env.assert_called_once()
         mock_env.return_value.get_template.assert_called_once_with(template_file.name)
         mock_template.render.assert_called_once_with(notebooks=notebooks, apps=apps, notebooks_wasm=notebooks_wasm)
-        mock_file_open.assert_called_once_with(output_dir / "index.html", "w")
-        mock_file_open().write.assert_called_once_with("<html>Rendered content</html>")
+        # Check that the index.html file was opened for writing (audit logger also uses Path.open)
+        mock_file_open.assert_any_call(output_dir / "index.html", "w")
 
         # Check that the function returns the rendered HTML
         assert result == "<html>Rendered content</html>"
 
     @patch.object(Path, "open", side_effect=OSError("File error"))
-    @patch("jinja2.Environment")
+    @patch("marimushka.orchestrator.SandboxedEnvironment")
     def test_generate_index_file_error(self, mock_env, mock_file_open, tmp_path):
         """Test handling of file error during index generation."""
         # Setup
@@ -328,7 +420,7 @@ class TestGenerateIndex:
 
         # Execute and Assert - now raises IndexWriteError
         with pytest.raises(IndexWriteError) as exc_info:
-            _generate_index(
+            generate_index(
                 output=output_dir, template_file=template_file, notebooks=notebooks, apps=apps, parallel=False
             )
 
@@ -336,9 +428,11 @@ class TestGenerateIndex:
         assert exc_info.value.index_path == output_dir / "index.html"
 
         # Check that export was still called before the error
-        mock_notebook.export.assert_called_once_with(output_dir=output_dir / "notebooks", sandbox=True, bin_path=None)
+        mock_notebook.export.assert_called_once_with(
+            output_dir=output_dir / "notebooks", sandbox=True, bin_path=None, timeout=300
+        )
 
-    @patch("jinja2.Environment")
+    @patch("marimushka.orchestrator.SandboxedEnvironment")
     @patch.object(Path, "mkdir")
     def test_generate_index_template_error(self, mock_mkdir, mock_env, tmp_path):
         """Test handling of template error during index generation."""
@@ -357,7 +451,7 @@ class TestGenerateIndex:
 
         # Execute and Assert - now raises TemplateRenderError
         with pytest.raises(TemplateRenderError) as exc_info:
-            _generate_index(
+            generate_index(
                 output=output_dir, template_file=template_file, notebooks=notebooks, apps=apps, parallel=False
             )
 
@@ -365,7 +459,9 @@ class TestGenerateIndex:
         assert exc_info.value.template_path == template_file
 
         # Check that export was still called before the template error
-        mock_notebook.export.assert_called_once_with(output_dir=output_dir / "notebooks", sandbox=True, bin_path=None)
+        mock_notebook.export.assert_called_once_with(
+            output_dir=output_dir / "notebooks", sandbox=True, bin_path=None, timeout=300
+        )
 
     def test_generate_index_no_notebooks(self, tmp_path):
         """Test index generation with no notebooks."""
@@ -375,7 +471,7 @@ class TestGenerateIndex:
         template_file.write_text("<html>{{ notebooks }}</html>")
 
         # Execute
-        result = _generate_index(
+        result = generate_index(
             output=output_dir,
             template_file=template_file,
             notebooks=[],
@@ -390,9 +486,9 @@ class TestGenerateIndex:
 class TestMain:
     """Tests for the main function."""
 
-    @patch("marimushka.export._validate_template")
+    @patch("marimushka.export.validate_template")
     @patch("marimushka.export.folder2notebooks")
-    @patch("marimushka.export._generate_index")
+    @patch("marimushka.export.generate_index")
     def test_main_success(self, mock_generate_index, mock_folder2notebooks, mock_validate):
         """Test successful execution of the main function."""
         # Setup
@@ -411,9 +507,9 @@ class TestMain:
         mock_folder2notebooks.assert_any_call(folder="notebooks", kind=Kind.NB_WASM)
         mock_generate_index.assert_called_once()
 
-    @patch("marimushka.export._validate_template")
+    @patch("marimushka.export.validate_template")
     @patch("marimushka.export.folder2notebooks")
-    @patch("marimushka.export._generate_index")
+    @patch("marimushka.export.generate_index")
     def test_main_no_notebooks_or_apps(self, mock_generate_index, mock_folder2notebooks, mock_validate):
         """Test handling of no notebooks or apps found."""
         # Setup
@@ -429,9 +525,9 @@ class TestMain:
         mock_folder2notebooks.assert_any_call(folder="notebooks", kind=Kind.NB_WASM)
         mock_generate_index.assert_not_called()
 
-    @patch("marimushka.export._validate_template")
+    @patch("marimushka.export.validate_template")
     @patch("marimushka.export.folder2notebooks")
-    @patch("marimushka.export._generate_index")
+    @patch("marimushka.export.generate_index")
     def test_main_custom_paths(self, mock_generate_index, mock_folder2notebooks, mock_validate, tmp_path):
         """Test main function with custom paths."""
         # Setup
@@ -471,11 +567,14 @@ class TestMain:
             bin_path=None,
             parallel=True,
             max_workers=4,
+            timeout=300,
+            on_progress=None,
+            audit_logger=ANY,  # audit_logger is created internally
         )
 
-    @patch("marimushka.export._validate_template")
+    @patch("marimushka.export.validate_template")
     @patch("marimushka.export.folder2notebooks")
-    @patch("marimushka.export._generate_index")
+    @patch("marimushka.export.generate_index")
     def test_main_parallel_options(self, mock_generate_index, mock_folder2notebooks, mock_validate, tmp_path):
         """Test main function with parallel options."""
         # Setup
@@ -515,7 +614,7 @@ class TestCallback:
     @patch("builtins.print")
     def test_callback_without_command(self, mock_print):
         """Test callback function when no command is provided."""
-        from marimushka.export import callback
+        from marimushka.cli import callback
 
         # Setup - create a mock context with no subcommand
         mock_ctx = MagicMock(spec=typer.Context)
@@ -532,7 +631,7 @@ class TestCallback:
 
     def test_callback_with_command(self):
         """Test callback function when a command is provided."""
-        from marimushka.export import callback
+        from marimushka.cli import callback
 
         # Setup - create a mock context with a subcommand
         mock_ctx = MagicMock(spec=typer.Context)
@@ -551,10 +650,10 @@ class TestMainTyper:
     @patch("marimushka.export.main")
     def test_main_typer_passes_parameters_directly(self, mock_main):
         """Test _main_typer function passes parameters directly to main()."""
-        from marimushka.export import _main_typer
+        from marimushka.cli import export_command
 
         # Execute - pass values directly (as Typer does after resolving Options)
-        _main_typer(
+        export_command(
             output="custom_site",
             template="custom_template.html",
             notebooks="custom_notebooks",
@@ -564,6 +663,7 @@ class TestMainTyper:
             bin_path="/custom/bin",
             parallel=True,
             max_workers=4,
+            timeout=300,
         )
 
         # Assert - verify that main was called with the same values
@@ -577,15 +677,16 @@ class TestMainTyper:
             bin_path="/custom/bin",
             parallel=True,
             max_workers=4,
+            timeout=300,
         )
 
     @patch("marimushka.export.main")
     def test_main_typer_with_string_values(self, mock_main):
         """Test _main_typer function with string values (not Option objects)."""
-        from marimushka.export import _main_typer
+        from marimushka.cli import export_command
 
         # Execute with regular string values
-        _main_typer(
+        export_command(
             output="output_dir",
             template="template.html",
             notebooks="notebooks",
@@ -595,6 +696,7 @@ class TestMainTyper:
             bin_path="/bin",
             parallel=False,
             max_workers=2,
+            timeout=300,
         )
 
         # Assert - verify that main was called with the same values
@@ -608,6 +710,7 @@ class TestMainTyper:
             bin_path="/bin",
             parallel=False,
             max_workers=2,
+            timeout=300,
         )
 
 
@@ -616,16 +719,16 @@ class TestWatchCommand:
 
     def test_watch_command_no_watchfiles(self):
         """Test watch command fails gracefully without watchfiles."""
-        from marimushka.export import watch
+        from marimushka.cli import watch_command
 
         # We can't easily test the ImportError case without actually
         # uninstalling watchfiles, so we just verify the function exists
-        assert callable(watch)
+        assert callable(watch_command)
 
     @patch("marimushka.export.main")
     def test_watch_command_exists(self, mock_main):
         """Test that watch command is registered."""
-        from marimushka.export import app
+        from marimushka.cli import app
 
         # Get all registered commands
         commands = [cmd.name for cmd in app.registered_commands]
@@ -635,14 +738,14 @@ class TestWatchCommand:
         assert "export" in commands
         assert "version" in commands
 
-    @patch("marimushka.export.rich_print")
+    @patch("marimushka.cli.rich_print")
     def test_watch_no_directories_to_watch(self, mock_print, tmp_path):
         """Test watch command exits when no directories exist to watch."""
-        from marimushka.export import watch
+        from marimushka.cli import watch_command
 
         # Use non-existent paths
         with pytest.raises(typer.Exit) as exc_info:
-            watch(
+            watch_command(
                 output=str(tmp_path / "_site"),
                 template=str(tmp_path / "nonexistent_template.j2"),
                 notebooks=str(tmp_path / "nonexistent_notebooks"),
@@ -652,13 +755,14 @@ class TestWatchCommand:
                 bin_path=None,
                 parallel=True,
                 max_workers=4,
+                timeout=300,
             )
         assert exc_info.value.exit_code == 1
         # Verify warning was printed
         mock_print.assert_any_call("[bold yellow]Warning:[/bold yellow] No directories to watch!")
 
     @patch("marimushka.export.main")
-    @patch("marimushka.export.rich_print")
+    @patch("marimushka.cli.rich_print")
     def test_watch_initial_export_called(self, mock_print, mock_main, tmp_path):
         """Test watch command calls initial export before watching."""
         # Setup directories
@@ -675,9 +779,9 @@ class TestWatchCommand:
             raise KeyboardInterrupt
 
         with patch("watchfiles.watch", mock_watch_generator):
-            from marimushka.export import watch
+            from marimushka.cli import watch_command
 
-            watch(
+            watch_command(
                 output=str(tmp_path / "_site"),
                 template=str(template_file),
                 notebooks=str(notebooks_dir),
@@ -687,6 +791,7 @@ class TestWatchCommand:
                 bin_path=None,
                 parallel=True,
                 max_workers=4,
+                timeout=300,
             )
 
         # Verify initial export was called with correct parameters
@@ -700,10 +805,11 @@ class TestWatchCommand:
             bin_path=None,
             parallel=True,
             max_workers=4,
+            timeout=300,
         )
 
     @patch("marimushka.export.main")
-    @patch("marimushka.export.rich_print")
+    @patch("marimushka.cli.rich_print")
     def test_watch_keyboard_interrupt_handled(self, mock_print, mock_main, tmp_path):
         """Test watch command handles KeyboardInterrupt gracefully."""
         # Setup directories
@@ -720,10 +826,10 @@ class TestWatchCommand:
             raise KeyboardInterrupt
 
         with patch("watchfiles.watch", mock_watch_generator):
-            from marimushka.export import watch
+            from marimushka.cli import watch_command
 
             # Should not raise, should handle gracefully
-            watch(
+            watch_command(
                 output=str(tmp_path / "_site"),
                 template=str(template_file),
                 notebooks=str(notebooks_dir),
@@ -733,13 +839,14 @@ class TestWatchCommand:
                 bin_path=None,
                 parallel=True,
                 max_workers=4,
+                timeout=300,
             )
 
         # Verify the "stopped" message was printed
         mock_print.assert_any_call("\n[bold green]Watch mode stopped.[/bold green]")
 
     @patch("marimushka.export.main")
-    @patch("marimushka.export.rich_print")
+    @patch("marimushka.cli.rich_print")
     def test_watch_reexports_on_change(self, mock_print, mock_main, tmp_path):
         """Test watch command re-exports when files change."""
         # Setup directories
@@ -761,9 +868,9 @@ class TestWatchCommand:
             raise KeyboardInterrupt
 
         with patch("watchfiles.watch", mock_watch_generator):
-            from marimushka.export import watch
+            from marimushka.cli import watch_command
 
-            watch(
+            watch_command(
                 output=str(tmp_path / "_site"),
                 template=str(template_file),
                 notebooks=str(notebooks_dir),
@@ -773,13 +880,14 @@ class TestWatchCommand:
                 bin_path=None,
                 parallel=True,
                 max_workers=4,
+                timeout=300,
             )
 
         # Verify main was called twice: once for initial export, once for re-export
         assert mock_main.call_count == 2
 
     @patch("marimushka.export.main")
-    @patch("marimushka.export.rich_print")
+    @patch("marimushka.cli.rich_print")
     def test_watch_shows_changed_files(self, mock_print, mock_main, tmp_path):
         """Test watch command displays changed files."""
         # Setup directories
@@ -801,9 +909,9 @@ class TestWatchCommand:
             raise KeyboardInterrupt
 
         with patch("watchfiles.watch", mock_watch_generator):
-            from marimushka.export import watch
+            from marimushka.cli import watch_command
 
-            watch(
+            watch_command(
                 output=str(tmp_path / "_site"),
                 template=str(template_file),
                 notebooks=str(notebooks_dir),
@@ -813,6 +921,7 @@ class TestWatchCommand:
                 bin_path=None,
                 parallel=True,
                 max_workers=4,
+                timeout=300,
             )
 
         # Verify changed files were printed
@@ -820,7 +929,7 @@ class TestWatchCommand:
         mock_print.assert_any_call("  [dim]/path/to/file1.py[/dim]")
 
     @patch("marimushka.export.main")
-    @patch("marimushka.export.rich_print")
+    @patch("marimushka.cli.rich_print")
     def test_watch_truncates_long_change_list(self, mock_print, mock_main, tmp_path):
         """Test watch command truncates list when more than 5 files change."""
         # Setup directories
@@ -838,9 +947,9 @@ class TestWatchCommand:
             raise KeyboardInterrupt
 
         with patch("watchfiles.watch", mock_watch_generator):
-            from marimushka.export import watch
+            from marimushka.cli import watch_command
 
-            watch(
+            watch_command(
                 output=str(tmp_path / "_site"),
                 template=str(template_file),
                 notebooks=str(notebooks_dir),
@@ -850,13 +959,14 @@ class TestWatchCommand:
                 bin_path=None,
                 parallel=True,
                 max_workers=4,
+                timeout=300,
             )
 
         # Verify truncation message was printed (10 files - 5 shown = 5 more)
         mock_print.assert_any_call("  [dim]... and 5 more[/dim]")
 
     @patch("marimushka.export.main")
-    @patch("marimushka.export.rich_print")
+    @patch("marimushka.cli.rich_print")
     def test_watch_with_custom_parameters(self, mock_print, mock_main, tmp_path):
         """Test watch command passes all parameters correctly."""
         # Setup directories
@@ -875,9 +985,9 @@ class TestWatchCommand:
             raise KeyboardInterrupt
 
         with patch("watchfiles.watch", mock_watch_generator):
-            from marimushka.export import watch
+            from marimushka.cli import watch_command
 
-            watch(
+            watch_command(
                 output=str(tmp_path / "custom_output"),
                 template=str(template_file),
                 notebooks=str(notebooks_dir),
@@ -887,6 +997,7 @@ class TestWatchCommand:
                 bin_path=str(bin_path_dir),
                 parallel=False,
                 max_workers=8,
+                timeout=600,
             )
 
         # Verify main was called with correct custom parameters
@@ -900,10 +1011,11 @@ class TestWatchCommand:
             bin_path=str(bin_path_dir),
             parallel=False,
             max_workers=8,
+            timeout=600,
         )
 
     @patch("marimushka.export.main")
-    @patch("marimushka.export.rich_print")
+    @patch("marimushka.cli.rich_print")
     def test_watch_template_parent_added_to_watch_paths(self, mock_print, mock_main, tmp_path):
         """Test watch command adds template parent directory to watch paths."""
         # Setup directories
@@ -923,9 +1035,9 @@ class TestWatchCommand:
             raise KeyboardInterrupt
 
         with patch("watchfiles.watch", mock_watch_generator):
-            from marimushka.export import watch
+            from marimushka.cli import watch_command
 
-            watch(
+            watch_command(
                 output=str(tmp_path / "_site"),
                 template=str(template_file),
                 notebooks=str(notebooks_dir),
@@ -935,6 +1047,7 @@ class TestWatchCommand:
                 bin_path=None,
                 parallel=True,
                 max_workers=4,
+                timeout=300,
             )
 
         # Verify template parent directory was included
@@ -958,7 +1071,7 @@ class TestValidateTemplateHypothesis:
             template_file.write_text("<html></html>")
 
             # Should not raise any exception
-            _validate_template(template_file)
+            validate_template(template_file, get_audit_logger())
 
     @given(
         stem=st.text(
@@ -974,7 +1087,7 @@ class TestValidateTemplateHypothesis:
             template_file.write_text("<html></html>")
 
             # Should not raise any exception
-            _validate_template(template_file)
+            validate_template(template_file, get_audit_logger())
 
     @given(
         stem=st.text(
@@ -990,7 +1103,7 @@ class TestValidateTemplateHypothesis:
             # Don't create the file
 
             with pytest.raises(TemplateNotFoundError) as exc_info:
-                _validate_template(template_file)
+                validate_template(template_file, get_audit_logger())
             assert exc_info.value.template_path == template_file
 
     @given(
@@ -1007,7 +1120,7 @@ class TestValidateTemplateHypothesis:
             template_dir.mkdir()
 
             with pytest.raises(TemplateInvalidError) as exc_info:
-                _validate_template(template_dir)
+                validate_template(template_dir, get_audit_logger())
             assert exc_info.value.template_path == template_dir
             assert "not a file" in exc_info.value.reason
 
@@ -1025,7 +1138,7 @@ class TestExportNotebooksParallelHypothesis:
             nb.export.return_value = NotebookExportResult.succeeded(Path(f"/nb{i}.py"), Path(f"/output/nb{i}.html"))
             mock_notebooks.append(nb)
 
-        result = _export_notebooks_parallel(mock_notebooks, Path("/output"), True, None, max_workers=2)
+        result = export_notebooks_parallel(mock_notebooks, Path("/output"), True, None, max_workers=2)
 
         assert len(result.results) == num_notebooks
         assert result.succeeded + result.failed == num_notebooks
@@ -1061,7 +1174,7 @@ class TestExportNotebooksParallelHypothesis:
             )
             mock_notebooks.append(nb)
 
-        result = _export_notebooks_parallel(mock_notebooks, Path("/output"), True, None, max_workers=2)
+        result = export_notebooks_parallel(mock_notebooks, Path("/output"), True, None, max_workers=2)
 
         assert result.succeeded == num_success
         assert result.failed == num_failure
@@ -1078,7 +1191,7 @@ class TestExportNotebooksParallelHypothesis:
             nb.export.return_value = NotebookExportResult.succeeded(Path(f"/nb{i}.py"), Path(f"/output/nb{i}.html"))
             mock_notebooks.append(nb)
 
-        result = _export_notebooks_parallel(mock_notebooks, Path("/output"), True, None, max_workers=max_workers)
+        result = export_notebooks_parallel(mock_notebooks, Path("/output"), True, None, max_workers=max_workers)
 
         assert result.succeeded == 5
         assert result.failed == 0
