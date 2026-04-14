@@ -36,7 +36,7 @@ jobs:
 
     steps:
       # Check out the repository code
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@v3.6.0
         with:
           lfs: true
 
@@ -68,7 +68,7 @@ jobs:
       # This allows anyone to download the built documentation directly from
       # GitHub Actions without needing to run a full local build.
       - name: Upload book as workflow artifact
-        uses: actions/upload-artifact@v7.0.0
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: book
           path: _book/
